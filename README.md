@@ -1,12 +1,12 @@
-# GenderScope JavaScript
+# NameGender JavaScript
 
 ```sh
-npm install genderscope
+npm install namegender
 ```
 
 ```js
-import { GenderScope } from 'genderscope';
-const client = new GenderScope(process.env.GENDERSCOPE_API_KEY);
+import { NameGender } from 'namegender';
+const client = new NameGender(process.env.NAMEGENDER_API_KEY);
 const result = await client.name('Ayşe', { country: 'TR' });
 console.log(result.gender, result.probability, result.confidence);
 ```

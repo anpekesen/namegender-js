@@ -1,10 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { GenderScope } from '../src/index.js';
+import { NameGender } from '../src/index.js';
 
 test('sends authenticated JSON', async () => {
   let request;
-  const client = new GenderScope('secret', { baseUrl: 'https://example.test/api/v1/', fetch: async (url, init) => {
+  const client = new NameGender('secret', { baseUrl: 'https://example.test/api/v1/', fetch: async (url, init) => {
     request = { url, init };
     return { ok: true, json: async () => ({ gender: 'female' }) };
   }});

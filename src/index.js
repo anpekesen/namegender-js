@@ -1,17 +1,17 @@
-export class GenderScopeError extends Error {
+export class NameGenderError extends Error {
   constructor(message, status, body) {
     super(message);
-    this.name = 'GenderScopeError';
+    this.name = 'NameGenderError';
     this.status = status;
     this.body = body;
   }
 }
 
-export class GenderScope {
+export class NameGender {
   constructor(apiKey, options = {}) {
     if (!apiKey) throw new TypeError('apiKey is required');
     this.apiKey = apiKey;
-    this.baseUrl = (options.baseUrl || 'https://genderscope.io/api/v1').replace(/\/$/, '');
+    this.baseUrl = (options.baseUrl || 'https://namegender.com/api/v1').replace(/\/$/, '');
     this.fetch = options.fetch || globalThis.fetch;
     if (!this.fetch) throw new TypeError('A fetch implementation is required');
   }
@@ -37,7 +37,7 @@ export class GenderScope {
       },
     });
     const body = await response.json().catch(() => null);
-    if (!response.ok) throw new GenderScopeError(body?.message || `HTTP ${response.status}`, response.status, body);
+    if (!response.ok) throw new NameGenderError(body?.message || `HTTP ${response.status}`, response.status, body);
     return body;
   }
 }

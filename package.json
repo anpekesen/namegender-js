@@ -1,7 +1,7 @@
 {
-  "name": "genderscope",
-  "version": "0.1.0",
-  "description": "Official JavaScript client for the GenderScope API",
+  "name": "namegender",
+  "version": "0.2.0",
+  "description": "Official JavaScript client for the NameGender API",
   "type": "module",
   "main": "src/index.js",
   "exports": "./src/index.js",
@@ -10,11 +10,11 @@
   "scripts": { "test": "node --test" },
   "engines": { "node": ">=18" },
   "sideEffects": false,
-  "keywords": ["gender", "name", "api", "genderscope", "typescript"],
-  "author": "GenderScope <support@genderscope.io>",
+  "keywords": ["gender", "name", "api", "namegender", "typescript"],
+  "author": "NameGender <support@namegender.com>",
   "license": "MIT",
-  "homepage": "https://genderscope.io/docs",
-  "repository": { "type": "git", "url": "git+https://github.com/anpekesen/genderscope-js.git" },
-  "bugs": { "url": "https://github.com/anpekesen/genderscope-js/issues" },
+  "homepage": "https://namegender.com/docs",
+  "repository": { "type": "git", "url": "git+https://github.com/anpekesen/namegender-js.git" },
+  "bugs": { "url": "https://github.com/anpekesen/namegender-js/issues" },
   "publishConfig": { "access": "public" }
 }
