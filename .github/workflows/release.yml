@@ -1,0 +1,45 @@
+# npm yayını.
+#
+# Tetikleyici bilerek ETİKET: main'e her gidişte yayınlamak, yarım kalmış bir
+# değişikliği geri alınamaz biçimde yayına iter. npm'de bir sürüm silinemez.
+#
+# Yayından ÖNCE testler koşuyor. Sıralamayı ters kurmak, kırık bir paketi
+# yayınlayıp ardından hatayı öğrenmek demektir.
+name: release
+
+on:
+  push:
+    tags: ['v*']
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # Provenance (paketin hangi commit'ten üretildiğinin doğrulanabilir
+      # kaydı) için gerekli.
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: https://registry.npmjs.org
+
+      - run: node --test
+
+      # package.json'daki sürüm ile etiket aynı olmalı. Aynı değilse yayın
+      # DURUR: yanlış sürümü yayınlamak geri alınamaz.
+      - name: Sürüm etiketle eşleşiyor mu
+        run: |
+          pkg=$(node -p "require('./package.json').version")
+          tag="${GITHUB_REF_NAME#v}"
+          if [ "$pkg" != "$tag" ]; then
+            echo "package.json ($pkg) ile etiket ($tag) uyuşmuyor" >&2
+            exit 1
+          fi
+
+      - run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
