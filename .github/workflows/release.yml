@@ -5,6 +5,11 @@
 #
 # Yayından ÖNCE testler koşuyor. Sıralamayı ters kurmak, kırık bir paketi
 # yayınlayıp ardından hatayı öğrenmek demektir.
+#
+# Token YOK: npm Trusted Publishing (GitHub OIDC). npmjs.com'da paketin
+# Trusted Publisher kaydı bu depoyu ve release.yml'i göstermeli, izni de
+# "npm publish" olmalı ("stage publish" doğrudan yayını 403 ile reddeder).
+# Süresi dolan ya da sızabilen bir NPM_TOKEN saklanmıyor.
 name: release
 
 on:
@@ -14,18 +19,21 @@ on:
 jobs:
   publish:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: read
-      # Provenance (paketin hangi commit'ten üretildiğinin doğrulanabilir
-      # kaydı) için gerekli.
+      # Trusted Publishing ve provenance (paketin hangi commit'ten
+      # üretildiğinin doğrulanabilir kaydı) için gerekli.
       id-token: write
     steps:
       - uses: actions/checkout@v4
 
+      # Trusted Publishing için Node 22.14+ ve npm 11.5.1+ gerekiyor.
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
           registry-url: https://registry.npmjs.org
+      - run: npm install -g npm@^11.5.1
 
       - run: node --test
 
@@ -40,6 +48,14 @@ jobs:
             exit 1
           fi
 
-      - run: npm publish --provenance --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      # Aynı sürüm zaten yayındaysa atlanır: yarıda kalan bir çalışma
+      # yeniden başlatıldığında npm "sürüm var" diye düşmesin.
+      - name: npm'e yayınla
+        run: |
+          name=$(node -p "require('./package.json').name")
+          version=$(node -p "require('./package.json').version")
+          if npm view "$name@$version" version >/dev/null 2>&1; then
+            echo "$name@$version zaten npm'de, atlanıyor"
+          else
+            npm publish --access public
+          fi
