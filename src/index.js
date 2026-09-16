@@ -19,7 +19,13 @@ export class NameGender {
   name(name, options = {}) { return this.#post('/gender', { name, ...options }); }
   email(email, options = {}) { return this.#post('/gender/email', { email, ...options }); }
   username(username, options = {}) { return this.#post('/gender/username', { username, ...options }); }
-  bulk(names, options = {}) { return this.#post('/gender/bulk', { names, ...options }); }
+  // A string is one name, and any iterable (a Set, for example) becomes an
+  // array: the API accepts only a JSON array, and JSON.stringify turns a Set
+  // into {}.
+  bulk(names, options = {}) {
+    const list = typeof names === 'string' ? [names] : Array.from(names);
+    return this.#post('/gender/bulk', { names: list, ...options });
+  }
   countries(name, options = {}) { return this.#post('/gender/countries', { name, ...options }); }
   account() { return this.#request('/me', { method: 'GET' }); }
 

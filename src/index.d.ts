@@ -58,7 +58,7 @@ export class NameGender {
   name(name: string, options?: Options): Promise<GenderResponse>;
   email(email: string, options?: Options): Promise<GenderResponse>;
   username(username: string, options?: Options): Promise<GenderResponse>;
-  bulk(names: string[], options?: Options): Promise<BulkResponse>;
+  bulk(names: string | Iterable<string>, options?: Options): Promise<BulkResponse>;
   countries(name: string, options?: CountriesOptions): Promise<CountriesResponse>;
   account(): Promise<AccountResponse>;
 }

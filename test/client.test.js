@@ -52,3 +52,17 @@ test('throws on a non-2xx status and keeps the error body', async () => {
     return true;
   });
 });
+
+test('bulk always sends names as an array', async () => {
+  const bodies = [];
+  const client = new NameGender('secret', { fetch: async (url, init) => {
+    bodies.push(JSON.parse(init.body));
+    return { ok: true, json: async () => ({ results: [], summary: {} }) };
+  }});
+
+  await client.bulk('Ayşe');
+  await client.bulk(new Set(['Ayşe', 'Mehmet']));
+  await client.bulk(['Priya']);
+
+  assert.deepEqual(bodies.map((b) => b.names), [['Ayşe'], ['Ayşe', 'Mehmet'], ['Priya']]);
+});
