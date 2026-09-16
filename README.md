@@ -12,3 +12,25 @@ console.log(result.gender, result.probability, result.confidence);
 ```
 
 Node.js 18+, Deno and Bun are supported through the standard Fetch API.
+
+## Country distribution
+
+Returns the countries a name is recorded in. This is not a country-of-origin or
+ethnicity inference, and must not be used as one.
+
+```js
+const result = await client.countries('Mehmet', { limit: 10 });
+console.log(result.registrations); // [{ country: 'FR', count: 3775, share: 58.97, gender: 'male', probability: 99, source: 'insee' }, ...]
+console.log(result.attested_in);   // ['AL', 'AU', 'BE', ..., 'TR', 'US']
+console.log(result.basis.note);
+```
+
+The two lists are deliberately kept apart. `registrations` is measured volume and
+is comparable only among the seven countries that publish counted birth
+statistics (US, UK, France, Canada, Spain, Ireland, Norway); `share` is a
+percentage across those counts alone. `attested_in` is presence with no weight
+attached, which is where countries that publish no counts, such as Turkey, Japan
+and India, appear. Show `basis.note` next to any percentage you display.
+
+`limit` (1–100, default 25) caps how many counted countries come back in
+`registrations`. One credit per request.

@@ -20,6 +20,7 @@ export class NameGender {
   email(email, options = {}) { return this.#post('/gender/email', { email, ...options }); }
   username(username, options = {}) { return this.#post('/gender/username', { username, ...options }); }
   bulk(names, options = {}) { return this.#post('/gender/bulk', { names, ...options }); }
+  countries(name, options = {}) { return this.#post('/gender/countries', { name, ...options }); }
   account() { return this.#request('/me', { method: 'GET' }); }
 
   async #post(path, body) {
