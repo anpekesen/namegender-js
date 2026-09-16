@@ -8,10 +8,26 @@ npm install namegender
 import { NameGender } from 'namegender';
 const client = new NameGender(process.env.NAMEGENDER_API_KEY);
 const result = await client.name('Ayşe', { country: 'TR' });
-console.log(result.gender, result.probability, result.confidence);
+console.log(result.gender, result.probability, result.sample_size, result.confidence);
 ```
 
 Node.js 18+, Deno and Bun are supported through the standard Fetch API.
+
+## Options and response
+
+`name`, `email`, `username` and `bulk` accept `country`, `ai_fallback` and
+`best_guess`:
+
+```js
+const result = await client.name('Andrea', { country: 'IT', best_guess: true });
+```
+
+A result carries `query`, `name`, `gender`, `country`, `probability`,
+`sample_size`, `took_ms`, `source`, `confidence` and `matched_as`, alongside
+`credits_charged`, `credits_remaining`, `data_version` and `request_id`.
+Success is the HTTP status: any non-2xx response throws a `NameGenderError`
+whose `body` is `{ error, message, request_id, docs }`. Branch on `body.error`,
+not on `message`.
 
 ## Country distribution
 
