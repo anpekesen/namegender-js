@@ -13,6 +13,11 @@ console.log(result.gender, result.probability, result.sample_size, result.confid
 
 Node.js 18+, Deno and Bun are supported through the standard Fetch API.
 
+Get an API key from the [namegender.com](https://namegender.com) dashboard and
+keep it on the server. A key in browser code can be copied and spent by anyone
+who opens the page; restrict a key to your server's IP addresses in the
+dashboard if you can.
+
 ## Options and response
 
 `name`, `email`, `username` and `bulk` accept `country`, `ai_fallback` and
