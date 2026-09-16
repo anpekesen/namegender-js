@@ -1,20 +1,41 @@
 {
   "name": "namegender",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Official JavaScript client for the NameGender API",
   "type": "module",
   "main": "src/index.js",
   "exports": "./src/index.js",
   "types": "src/index.d.ts",
-  "files": ["src", "README.md", "LICENSE"],
-  "scripts": { "test": "node --test" },
-  "engines": { "node": ">=18" },
+  "files": [
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=18"
+  },
   "sideEffects": false,
-  "keywords": ["gender", "name", "api", "namegender", "typescript"],
+  "keywords": [
+    "gender",
+    "name",
+    "api",
+    "namegender",
+    "typescript"
+  ],
   "author": "NameGender <support@namegender.com>",
   "license": "MIT",
   "homepage": "https://namegender.com/docs",
-  "repository": { "type": "git", "url": "git+https://github.com/anpekesen/namegender-js.git" },
-  "bugs": { "url": "https://github.com/anpekesen/namegender-js/issues" },
-  "publishConfig": { "access": "public" }
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/anpekesen/namegender-js.git"
+  },
+  "bugs": {
+    "url": "https://github.com/anpekesen/namegender-js/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
 }
