@@ -20,6 +20,9 @@ export interface GenderResult {
   source: string;
   confidence: string;
   matched_as: string | null;
+  first_name: string | null;
+  middle_name: string | null;
+  last_name: string | null;
 }
 export interface GenderResponse extends Envelope, GenderResult {}
 export interface BulkResponse extends Envelope {
