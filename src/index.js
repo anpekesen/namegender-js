@@ -7,6 +7,116 @@ export class NameGenderError extends Error {
   }
 }
 
+const FINISHED = new Set(['completed', 'failed', 'cancelled']);
+
+// Statuses worth retrying an upload for: the request may never have reached
+// the application. Everything else (402, 422, 429 too_many_batches) would
+// fail the same way again.
+const RETRYABLE = new Set([502, 503, 504]);
+
+const sleep = (ms, signal) => new Promise((resolve, reject) => {
+  if (signal?.aborted) return reject(signal.reason);
+  const timer = setTimeout(resolve, ms);
+  signal?.addEventListener('abort', () => { clearTimeout(timer); reject(signal.reason); }, { once: true });
+});
+
+const newIdempotencyKey = () => globalThis.crypto?.randomUUID?.()
+  ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+
+/** File jobs: upload a CSV or XLSX file, get it back with gender columns added. */
+class Batches {
+  #send;
+  #request;
+
+  constructor(send, request) {
+    this.#send = send;
+    this.#request = request;
+  }
+
+  /**
+   * Upload a file and, unless `start: false`, start it.
+   *
+   * `file` is a Blob or File (in Node 20+, `await fs.openAsBlob(path)`), or
+   * bytes (Uint8Array, ArrayBuffer) together with `filename`. The extension
+   * of the file name tells the API whether it is CSV or XLSX.
+   *
+   * One Idempotency-Key is used for every attempt of this call, so a retry
+   * after a dropped connection returns the first job instead of opening a
+   * second one and reserving credit twice.
+   */
+  async create(file, options = {}) {
+    const { filename, idempotencyKey = newIdempotencyKey(), retries = 2, ...fields } = options;
+    const blob = file instanceof Blob ? file : new Blob([file]);
+    const name = filename ?? file?.name;
+    if (!name) throw new TypeError('filename is required when file is not a File');
+
+    const form = () => {
+      const data = new FormData();
+      data.append('file', blob, name);
+      for (const [key, value] of Object.entries(fields)) {
+        if (value !== undefined && value !== null) data.append(key, String(value));
+      }
+      return data;
+    };
+
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return await this.#request('/batches', {
+          method: 'POST',
+          body: form(),
+          headers: { 'Idempotency-Key': idempotencyKey },
+        });
+      } catch (error) {
+        const retryable = !(error instanceof NameGenderError) || RETRYABLE.has(error.status);
+        if (!retryable || attempt >= retries) throw error;
+        await sleep(1000 * 2 ** attempt);
+      }
+    }
+  }
+
+  /** Start a job uploaded with `start: false`. `name_column` is required. */
+  start(id, options) {
+    return this.#request(`/batches/${encodeURIComponent(id)}/start`, { method: 'POST', body: JSON.stringify(options) });
+  }
+
+  get(id) {
+    return this.#request(`/batches/${encodeURIComponent(id)}`, { method: 'GET' });
+  }
+
+  /** Newest first. Includes jobs started from the dashboard. */
+  list(options = {}) {
+    const query = new URLSearchParams(Object.entries(options).filter(([, v]) => v != null)).toString();
+    return this.#request(`/batches${query ? `?${query}` : ''}`, { method: 'GET' });
+  }
+
+  /** Cancel a job that has not started (credit is returned), or delete a finished one. */
+  async cancel(id) {
+    await this.#request(`/batches/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  }
+
+  /**
+   * Poll until the job is completed, failed or cancelled, and return it.
+   * A failed job is returned, not thrown: check `status` and `error.code`.
+   */
+  async wait(id, { timeoutMs = 60 * 60 * 1000, signal, onProgress } = {}) {
+    const deadline = Date.now() + timeoutMs;
+    for (;;) {
+      const job = await this.get(id);
+      onProgress?.(job);
+      if (FINISHED.has(job.status) || job.status === 'uploaded') return job;
+      const wait = (job.poll_after_seconds ?? 5) * 1000;
+      if (Date.now() + wait > deadline) throw new NameGenderError(`Timed out waiting for ${id}`, 0, job);
+      await sleep(wait, signal);
+    }
+  }
+
+  /** The result file as a Blob, in the format that was uploaded. */
+  async download(id) {
+    const response = await this.#send(`/batches/${encodeURIComponent(id)}/result`, { method: 'GET' });
+    return response.blob();
+  }
+}
+
 export class NameGender {
   constructor(apiKey, options = {}) {
     if (!apiKey) throw new TypeError('apiKey is required');
@@ -14,6 +124,7 @@ export class NameGender {
     this.baseUrl = (options.baseUrl || 'https://namegender.com/api/v1').replace(/\/$/, '');
     this.fetch = options.fetch || globalThis.fetch;
     if (!this.fetch) throw new TypeError('A fetch implementation is required');
+    this.batches = new Batches((path, init) => this.#send(path, init), (path, init) => this.#request(path, init));
   }
 
   name(name, options = {}) { return this.#post('/gender', { name, ...options }); }
@@ -34,17 +145,26 @@ export class NameGender {
   }
 
   async #request(path, init) {
+    const response = await this.#send(path, init);
+    // 204 (a cancelled job) has no body.
+    return response.status === 204 ? null : response.json().catch(() => null);
+  }
+
+  async #send(path, init) {
     const response = await this.fetch(this.baseUrl + path, {
       ...init,
       headers: {
         Accept: 'application/json',
-        'Content-Type': 'application/json',
+        // FormData sets its own multipart Content-Type with the boundary.
+        ...(typeof init.body === 'string' ? { 'Content-Type': 'application/json' } : {}),
         Authorization: `Bearer ${this.apiKey}`,
         ...init.headers,
       },
     });
-    const body = await response.json().catch(() => null);
-    if (!response.ok) throw new NameGenderError(body?.message || `HTTP ${response.status}`, response.status, body);
-    return body;
+    if (!response.ok) {
+      const body = await response.json().catch(() => null);
+      throw new NameGenderError(body?.message || `HTTP ${response.status}`, response.status, body);
+    }
+    return response;
   }
 }

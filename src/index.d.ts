@@ -53,6 +53,67 @@ export interface AccountResponse {
   data_version: string | null;
   ai: { consented: boolean; consented_at: string | null; subprocessor: Record<string, string | null> };
 }
+export type BatchStatus = 'uploaded'|'queued'|'processing'|'completed'|'failed'|'cancelled';
+export type BatchErrorCode = 'source_missing'|'no_columns'|'name_column_missing'|'empty_file'|'bad_format'|'unreadable'|'no_credits'|'processing_error'|'stalled';
+export interface BatchSettings {
+  /** Header of the column holding the names, exactly as in the file. Required to start. */
+  name_column?: string;
+  /** Header of a column holding a country code per row. */
+  country_column?: string;
+  /** Default country for rows without one. */
+  country?: string;
+  /** Requires AI consent on the account. */
+  ai_fallback?: boolean;
+  best_guess?: boolean;
+  /** The result can be downloaded once, then it is deleted. */
+  delete_after_download?: boolean;
+}
+export interface BatchCreateOptions extends BatchSettings {
+  /** Needed when `file` is bytes rather than a File. Its extension (.csv, .xlsx) sets the format. */
+  filename?: string;
+  /** false: upload and inspect only; see `inspection` on the job. Default true. */
+  start?: boolean;
+  /** Reused across retries of this call. Generated when omitted. */
+  idempotencyKey?: string;
+  /** Retries on network errors and 502/503/504. Default 2. */
+  retries?: number;
+}
+export interface BatchJob {
+  id: string;
+  status: BatchStatus;
+  source: 'api'|'panel';
+  file: { name: string; format: 'csv'|'xlsx' };
+  columns: { name: string | null; country: string | null };
+  options: { country: string | null; ai_fallback: boolean; best_guess: boolean; delete_after_download: boolean };
+  rows: { total: number; processed: number; identified: number | null };
+  progress: number;
+  credits: { reserved: number | null; charged: number | null };
+  summary: { male: number; female: number; unknown: number; from_llm: number } | null;
+  data_version: string | null;
+  /** Set when status is 'failed'. Branch on `code`. */
+  error: { code: BatchErrorCode; message: string } | null;
+  result: { url: string; format: 'csv'|'xlsx'; expires_at: string | null } | null;
+  /** Only while status is 'uploaded'. */
+  inspection: {
+    columns: string[]; preview: string[][];
+    guessed_name_column: string | null; guessed_country_column: string | null;
+    credits_needed: number; credits_available: number;
+  } | null;
+  poll_after_seconds: number | null;
+  created_at: string | null; started_at: string | null; finished_at: string | null; expires_at: string | null;
+}
+export interface BatchList { data: BatchJob[]; page: number; per_page: number; total: number; has_more: boolean }
+export interface WaitOptions { timeoutMs?: number; signal?: AbortSignal; onProgress?: (job: BatchJob) => void }
+export interface Batches {
+  create(file: Blob | ArrayBuffer | Uint8Array, options?: BatchCreateOptions): Promise<BatchJob>;
+  start(id: string, options: BatchSettings & { name_column: string }): Promise<BatchJob>;
+  get(id: string): Promise<BatchJob>;
+  list(options?: { limit?: number; page?: number }): Promise<BatchList>;
+  cancel(id: string): Promise<void>;
+  /** Resolves with the job once completed, failed or cancelled; a failed job is not thrown. */
+  wait(id: string, options?: WaitOptions): Promise<BatchJob>;
+  download(id: string): Promise<Blob>;
+}
 export interface ClientOptions { baseUrl?: string; fetch?: typeof globalThis.fetch }
 /** Thrown for any non-2xx response. `body` is the error body: { error, message, request_id, docs }. */
 export class NameGenderError extends Error { status: number; body: unknown }
@@ -64,4 +125,6 @@ export class NameGender {
   bulk(names: string | Iterable<string>, options?: Options): Promise<BulkResponse>;
   countries(name: string, options?: CountriesOptions): Promise<CountriesResponse>;
   account(): Promise<AccountResponse>;
+  /** File jobs: upload a CSV or XLSX file, get it back with gender columns added. */
+  readonly batches: Batches;
 }

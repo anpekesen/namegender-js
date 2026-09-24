@@ -66,3 +66,89 @@ test('bulk always sends names as an array', async () => {
 
   assert.deepEqual(bodies.map((b) => b.names), [['Ayşe'], ['Ayşe', 'Mehmet'], ['Priya']]);
 });
+
+const job = (overrides = {}) => ({ id: 'B-1', status: 'queued', poll_after_seconds: 0, ...overrides });
+
+test('uploads a file as multipart with an idempotency key', async () => {
+  let request;
+  const client = new NameGender('secret', { fetch: async (url, init) => {
+    request = { url, init };
+    return { ok: true, status: 202, json: async () => job() };
+  }});
+
+  const result = await client.batches.create(new TextEncoder().encode('ad\nAyşe\n'), {
+    filename: 'customers.csv', name_column: 'ad', country: 'TR', best_guess: true,
+  });
+
+  assert.equal(result.id, 'B-1');
+  assert.equal(request.url, 'https://namegender.com/api/v1/batches');
+  assert.ok(request.init.body instanceof FormData);
+  assert.equal(request.init.headers['Content-Type'], undefined, 'FormData must set its own boundary');
+  assert.ok(request.init.headers['Idempotency-Key']);
+  assert.equal(request.init.body.get('name_column'), 'ad');
+  assert.equal(request.init.body.get('best_guess'), 'true');
+  assert.equal(request.init.body.get('file').name, 'customers.csv');
+  assert.equal(await request.init.body.get('file').text(), 'ad\nAyşe\n');
+});
+
+test('retries an upload with the same idempotency key, but not a refusal', async () => {
+  const keys = [];
+  let calls = 0;
+  const client = new NameGender('secret', { fetch: async (url, init) => {
+    keys.push(init.headers['Idempotency-Key']);
+    calls++;
+    if (calls === 1) throw new TypeError('fetch failed');
+    return { ok: true, status: 202, json: async () => job() };
+  }});
+
+  await client.batches.create(new Blob(['ad\nAyşe\n']), { filename: 'a.csv', name_column: 'ad' });
+  assert.equal(keys.length, 2);
+  assert.equal(keys[0], keys[1]);
+
+  let refused = 0;
+  const strict = new NameGender('secret', { fetch: async () => {
+    refused++;
+    return { ok: false, status: 402, json: async () => ({ error: 'no_credits' }) };
+  }});
+  await assert.rejects(() => strict.batches.create(new Blob(['x']), { filename: 'a.csv', name_column: 'ad' }));
+  assert.equal(refused, 1);
+});
+
+test('requires a filename for raw bytes', async () => {
+  const client = new NameGender('secret', { fetch: async () => assert.fail('no request expected') });
+  await assert.rejects(() => client.batches.create(new Uint8Array([1])), TypeError);
+});
+
+test('waits until the job finishes and reports progress', async () => {
+  const statuses = ['queued', 'processing', 'completed'];
+  const seen = [];
+  const client = new NameGender('secret', { fetch: async (url) => {
+    assert.equal(url, 'https://namegender.com/api/v1/batches/B-1');
+    return { ok: true, status: 200, json: async () => job({ status: statuses.shift() }) };
+  }});
+
+  const result = await client.batches.wait('B-1', { onProgress: (j) => seen.push(j.status) });
+  assert.equal(result.status, 'completed');
+  assert.deepEqual(seen, ['queued', 'processing', 'completed']);
+});
+
+test('cancels, lists and downloads', async () => {
+  const requests = [];
+  const client = new NameGender('secret', { fetch: async (url, init) => {
+    requests.push(`${init.method} ${url}`);
+    if (init.method === 'DELETE') return { ok: true, status: 204, json: async () => { throw new Error('no body'); } };
+    if (url.endsWith('/result')) return { ok: true, status: 200, blob: async () => new Blob(['ad,gender\n']) };
+    return { ok: true, status: 200, json: async () => ({ data: [], total: 0 }) };
+  }});
+
+  assert.equal(await client.batches.cancel('B-1'), undefined);
+  await client.batches.list({ limit: 5 });
+  const file = await client.batches.download('B-1');
+  assert.equal(await file.text(), 'ad,gender\n');
+
+  assert.deepEqual(requests, [
+    'DELETE https://namegender.com/api/v1/batches/B-1',
+    'GET https://namegender.com/api/v1/batches?limit=5',
+    'GET https://namegender.com/api/v1/batches/B-1/result',
+  ]);
+});
