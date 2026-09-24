@@ -114,6 +114,29 @@ export interface Batches {
   wait(id: string, options?: WaitOptions): Promise<BatchJob>;
   download(id: string): Promise<Blob>;
 }
+export type WebhookEventType = 'batch.completed'|'batch.failed'|'webhook.test';
+export interface WebhookEvent<T = BatchJob | { message: string }> {
+  /** Stable across retries: deduplicate on it. */
+  id: string;
+  type: WebhookEventType;
+  created_at: string;
+  api_version: 'v1';
+  data: { object: T };
+}
+/** Thrown when a webhook request fails verification. Answer it with 400 and do nothing else. */
+export class NameGenderWebhookError extends Error {}
+export const webhooks: {
+  /**
+   * Checks NameGender-Signature and returns the parsed event.
+   * `rawBody` must be the body exactly as received, not re-serialised JSON.
+   */
+  verify(
+    rawBody: string | Uint8Array | ArrayBuffer,
+    signatureHeader: string | null | undefined,
+    secret: string,
+    options?: { toleranceSeconds?: number; now?: number },
+  ): Promise<WebhookEvent>;
+};
 export interface ClientOptions { baseUrl?: string; fetch?: typeof globalThis.fetch }
 /** Thrown for any non-2xx response. `body` is the error body: { error, message, request_id, docs }. */
 export class NameGenderError extends Error { status: number; body: unknown }

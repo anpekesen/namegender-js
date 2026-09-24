@@ -98,3 +98,43 @@ The result appends `gender`, `probability`, `sample_size`, `country`, `source`,
 `matched_as`, `first_name`, `middle_name`, `last_name` and `name_type` to every
 row. A CSV result starts with a UTF-8 byte order mark so that Excel reads it
 correctly.
+
+## Webhooks
+
+Add an endpoint under Webhooks in the dashboard, and NameGender sends a signed
+`POST` to it when a file job completes or fails. `webhooks.verify` checks the
+signature and the timestamp, and returns the event.
+
+```js
+import express from 'express';
+import { webhooks, NameGenderWebhookError } from 'namegender';
+
+const app = express();
+
+// express.raw, not express.json: the signature covers the exact bytes sent.
+app.post('/namegender', express.raw({ type: 'application/json' }), async (req, res) => {
+  let event;
+  try {
+    event = await webhooks.verify(
+      req.body,
+      req.get('NameGender-Signature'),
+      process.env.NAMEGENDER_WEBHOOK_SECRET,
+    );
+  } catch (error) {
+    if (error instanceof NameGenderWebhookError) return res.sendStatus(400);
+    throw error;
+  }
+
+  res.sendStatus(204);   // answer first, then do the work
+
+  if (event.type === 'batch.completed') {
+    // event.data.object is the job, as batches.get() returns it
+  }
+});
+```
+
+Use `event.id` (also the `NameGender-Event-Id` header) to ignore a delivery you
+have already handled. A retry carries the same id, and order is not guaranteed.
+Anything other than a 2xx within 10 seconds is retried, up to 8 attempts over
+about 45 hours. `verify` uses Web Crypto, so it works the same on Node 18+,
+Deno, Bun and edge runtimes.

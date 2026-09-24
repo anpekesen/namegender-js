@@ -7,6 +7,73 @@ export class NameGenderError extends Error {
   }
 }
 
+export class NameGenderWebhookError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = 'NameGenderWebhookError';
+  }
+}
+
+const encoder = new TextEncoder();
+
+const toBytes = (body) => {
+  if (typeof body === 'string') return encoder.encode(body);
+  if (body instanceof ArrayBuffer) return new Uint8Array(body);
+  if (ArrayBuffer.isView(body)) return new Uint8Array(body.buffer, body.byteOffset, body.byteLength);
+  throw new TypeError('rawBody must be the raw request body: a string, Buffer, Uint8Array or ArrayBuffer');
+};
+
+// Constant-time: the comparison must not reveal how many leading characters matched.
+const safeEqual = (a, b) => {
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return diff === 0;
+};
+
+/**
+ * Webhook signature check.
+ *
+ * Uses Web Crypto, so it runs on Node 18+, Deno, Bun and edge runtimes alike.
+ * Pass the body exactly as received: a framework that parses JSON and
+ * serialises it again (Express's json() middleware, for one) changes the bytes
+ * and the signature no longer matches.
+ */
+export const webhooks = {
+  async verify(rawBody, signatureHeader, secret, { toleranceSeconds = 300, now = Date.now() / 1000 } = {}) {
+    if (!secret) throw new TypeError('secret is required');
+    if (!signatureHeader) throw new NameGenderWebhookError('Missing NameGender-Signature header');
+
+    let timestamp = null;
+    const signatures = [];
+    for (const part of String(signatureHeader).split(',')) {
+      const [key, value] = part.trim().split('=', 2);
+      if (key === 't') timestamp = Number(value);
+      if (key === 'v1' && value) signatures.push(value);
+    }
+    if (!Number.isInteger(timestamp) || signatures.length === 0) {
+      throw new NameGenderWebhookError('Malformed NameGender-Signature header');
+    }
+    if (Math.abs(now - timestamp) > toleranceSeconds) {
+      throw new NameGenderWebhookError('Webhook timestamp is outside the tolerance window');
+    }
+
+    const bytes = toBytes(rawBody);
+    const key = await globalThis.crypto.subtle.importKey('raw', encoder.encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+    const signed = new Uint8Array(encoder.encode(`${timestamp}.`).length + bytes.length);
+    signed.set(encoder.encode(`${timestamp}.`));
+    signed.set(bytes, encoder.encode(`${timestamp}.`).length);
+    const mac = new Uint8Array(await globalThis.crypto.subtle.sign('HMAC', key, signed));
+    const expected = Array.from(mac, (b) => b.toString(16).padStart(2, '0')).join('');
+
+    if (!signatures.some((signature) => safeEqual(signature, expected))) {
+      throw new NameGenderWebhookError('Webhook signature does not match');
+    }
+
+    return JSON.parse(new TextDecoder().decode(bytes));
+  },
+};
+
 const FINISHED = new Set(['completed', 'failed', 'cancelled']);
 
 // Statuses worth retrying an upload for: the request may never have reached

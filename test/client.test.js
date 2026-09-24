@@ -152,3 +152,34 @@ test('cancels, lists and downloads', async () => {
     'GET https://namegender.com/api/v1/batches/B-1/result',
   ]);
 });
+
+// Same vector as the server's WebhookDeliveryTest, computed independently.
+const VECTOR = {
+  secret: 'whsec_test_vector',
+  body: '{"id":"evt_1","type":"webhook.test"}',
+  header: 't=1700000000,v1=857fcddfea47617c448b7a8e6537bbd59c9922a37c5273b2709812fbadb29e50',
+  now: 1700000000,
+};
+
+test('verifies a webhook against the shared test vector', async () => {
+  const { webhooks } = await import('../src/index.js');
+  const event = await webhooks.verify(VECTOR.body, VECTOR.header, VECTOR.secret, { now: VECTOR.now + 60 });
+  assert.equal(event.id, 'evt_1');
+
+  // Buffer and Uint8Array bodies are the same bytes.
+  await webhooks.verify(Buffer.from(VECTOR.body), VECTOR.header, VECTOR.secret, { now: VECTOR.now });
+  // A second v1 (secret rotation) is accepted when either matches.
+  await webhooks.verify(VECTOR.body, `t=1700000000,v1=${'0'.repeat(64)},v1=857fcddfea47617c448b7a8e6537bbd59c9922a37c5273b2709812fbadb29e50`, VECTOR.secret, { now: VECTOR.now });
+});
+
+test('rejects a tampered body, a wrong secret, an old timestamp and a missing header', async () => {
+  const { webhooks, NameGenderWebhookError } = await import('../src/index.js');
+  const reject = (...args) => assert.rejects(() => webhooks.verify(...args), NameGenderWebhookError);
+
+  await reject(VECTOR.body.replace('evt_1', 'evt_2'), VECTOR.header, VECTOR.secret, { now: VECTOR.now });
+  await reject(VECTOR.body, VECTOR.header, 'whsec_other', { now: VECTOR.now });
+  await reject(VECTOR.body, VECTOR.header, VECTOR.secret, { now: VECTOR.now + 301 });
+  await reject(VECTOR.body, undefined, VECTOR.secret, { now: VECTOR.now });
+  await reject(VECTOR.body, 't=abc,v1=', VECTOR.secret, { now: VECTOR.now });
+  await assert.rejects(() => webhooks.verify({ id: 'evt_1' }, VECTOR.header, VECTOR.secret, { now: VECTOR.now }), TypeError);
+});
