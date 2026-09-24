@@ -102,7 +102,8 @@ correctly.
 ## Webhooks
 
 Add an endpoint under Webhooks in the dashboard, and NameGender sends a signed
-`POST` to it when a file job completes or fails. `webhooks.verify` checks the
+`POST` to it when a file job completes or fails, and when credits are about to
+run out (`credits.low`) or have run out (`credits.depleted`, checked hourly). `webhooks.verify` checks the
 signature and the timestamp, and returns the event.
 
 ```js

@@ -114,8 +114,22 @@ export interface Batches {
   wait(id: string, options?: WaitOptions): Promise<BatchJob>;
   download(id: string): Promise<Blob>;
 }
-export type WebhookEventType = 'batch.completed'|'batch.failed'|'webhook.test';
-export interface WebhookEvent<T = BatchJob | { message: string }> {
+/** New types can be added: answer 2xx to one you do not handle and ignore it. */
+export type WebhookEventType = 'batch.completed'|'batch.failed'|'credits.low'|'credits.depleted'|'webhook.test';
+/** `data.object` of credits.low and credits.depleted. Checked hourly; a heads-up, not a balance feed. */
+export interface CreditsAlert {
+  kind: 'credits_low'|'credits_out';
+  /** Same as credits_remaining on /me: purchased, subscription and today's free credits. */
+  credits_remaining: number;
+  purchased: number;
+  subscription: number;
+  /** Average credits per day over the last 14 days. */
+  daily_burn: number;
+  /** credits.low only. */
+  runway_days?: number;
+  since: string;
+}
+export interface WebhookEvent<T = BatchJob | CreditsAlert | { message: string }> {
   /** Stable across retries: deduplicate on it. */
   id: string;
   type: WebhookEventType;
