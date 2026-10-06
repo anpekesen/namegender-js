@@ -43,6 +43,27 @@ function salutation(query, language = 'tr') {
     first_name: first, last_name: last ?? null, name_type: 'personal', country: 'TR' };
 }
 
+// "asdf qwerty" is implausible, "Mickey Mouse" suspicious, anything else plausible.
+function nameCheck(query) {
+  const [first, last = null] = query.split(' ');
+  const base = { query, first_name: first, last_name: last, name_type: 'personal',
+    evidence: { first_name_status: 'counted', first_name_counted_records: 5000 } };
+  if (query === 'asdf qwerty') {
+    return { ...base, assessment: 'implausible', score: 0, evidence: { first_name_status: 'not_found', first_name_counted_records: 0 }, signals: [
+      { code: 'keyboard_pattern', severity: 'high', part: 'first_name', value: 'asdf' },
+      { code: 'keyboard_pattern', severity: 'high', part: 'last_name', value: 'qwerty' },
+      { code: 'first_name_not_found', severity: 'medium', part: 'first_name', value: 'asdf' },
+    ] };
+  }
+  if (query === 'Mickey Mouse') {
+    return { ...base, assessment: 'suspicious', score: 40, signals: [
+      { code: 'fictional_character', severity: 'medium', part: 'full', value: 'Mickey Mouse' },
+      { code: 'first_name_attested', severity: 'info', part: 'first_name', value: 'Mickey' },
+    ] };
+  }
+  return { ...base, assessment: 'plausible', score: 92, signals: [{ code: 'first_name_attested', severity: 'positive', part: 'first_name', value: first }] };
+}
+
 before(async () => {
   server = createServer((req, res) => {
     let raw = '';
@@ -79,6 +100,23 @@ before(async () => {
           return;
         }
         res.end(JSON.stringify({ ...envelope, country_source: body.country ? 'country' : null, ...salutation(body.name, body.language) }));
+        return;
+      }
+      if (req.url === '/name-check/bulk') {
+        const results = body.names.map(nameCheck);
+        const count = (a) => results.filter((r) => r.assessment === a).length;
+        res.end(JSON.stringify({ ...envelope, credits_charged: results.length, took_ms: 2, country_source: null,
+          summary: { total: results.length, plausible: count('plausible'), suspicious: count('suspicious'), implausible: count('implausible') },
+          results }));
+        return;
+      }
+      if (req.url === '/name-check') {
+        if (body.name === '') {
+          res.statusCode = 400;
+          res.end(JSON.stringify({ error: 'missing_input', message: 'Send name, or first_name and last_name.' }));
+          return;
+        }
+        res.end(JSON.stringify({ ...envelope, country_source: body.country ? 'country' : body.locale ? 'locale' : null, ...nameCheck(body.name) }));
         return;
       }
       if (req.url === '/me') {
@@ -248,5 +286,61 @@ test('salutation rejects bad flags before any request', async () => {
   assert.equal((await run(['salutation', '--best-guess', 'Ahmet Yılmaz'])).code, 2);
   assert.equal((await run(['salutation', '--email', 'a@b.c'])).code, 2);
   assert.equal((await run(['--language', 'tr', 'Ahmet'])).code, 2);
+  assert.equal(requests.length, 0);
+});
+
+test('check prints the assessment and sends only the set options', async () => {
+  requests.length = 0;
+  const { code, stdout } = await run(['check', 'asdf qwerty', '--country', 'US']);
+  assert.equal(code, 0);
+  assert.equal(requests[0].url, '/name-check');
+  assert.deepEqual(requests[0].body, { name: 'asdf qwerty', country: 'US' });
+  assert.equal(stdout, 'QUERY        ASSESSMENT   SCORE  SIGNALS\nasdf qwerty  implausible  0      keyboard_pattern, first_name_not_found\n');
+});
+
+test('check lists only signals that count against a name', async () => {
+  requests.length = 0;
+  const { code, stdout } = await run(['check', '--locale', 'en-US', 'Jennifer Null', 'Mickey Mouse']);
+  assert.equal(code, 0);
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].url, '/name-check/bulk');
+  assert.deepEqual(requests[0].body, { names: ['Jennifer Null', 'Mickey Mouse'], locale: 'en-US' });
+  assert.match(stdout, /Jennifer Null\s+plausible\s+92\n/);
+  assert.match(stdout, /Mickey Mouse\s+suspicious\s+40\s+fictional_character\n/);
+  assert.doesNotMatch(stdout, /first_name_attested/);
+});
+
+test('check reads stdin in chunks of 100 and totals the summary', async () => {
+  requests.length = 0;
+  const names = Array.from({ length: 150 }, (_, i) => (i === 0 ? 'asdf qwerty' : i === 1 ? 'Mickey Mouse' : `Jennifer Null${i}`));
+  const { code, stdout } = await run(['check', '--json'], { input: `${names.join('\n')}\n\n` });
+  assert.equal(code, 0);
+  assert.deepEqual(requests.map((r) => [r.url, r.body.names.length]), [['/name-check/bulk', 100], ['/name-check/bulk', 50]]);
+  const out = JSON.parse(stdout);
+  assert.equal(out.results.length, 150);
+  assert.equal(out.results[0].query, 'asdf qwerty');
+  assert.equal(out.results[149].query, 'Jennifer Null149');
+  assert.equal(out.credits_charged, 150);
+  assert.deepEqual(out.summary, { total: 150, plausible: 148, suspicious: 1, implausible: 1 });
+});
+
+test('check csv prints the signals', async () => {
+  const { code, stdout } = await run(['check', '--csv'], { input: 'asdf qwerty\nJennifer Null\n' });
+  assert.equal(code, 0);
+  assert.equal(stdout, 'query,assessment,score,signals,name_type\nasdf qwerty,implausible,0,keyboard_pattern;first_name_not_found,personal\nJennifer Null,plausible,92,,personal\n');
+});
+
+test('check surfaces an API error', async () => {
+  const { code, stdout, stderr } = await run(['check', '']);
+  assert.equal(code, 1);
+  assert.equal(stdout, '');
+  assert.match(stderr, /Send name, or first_name and last_name\. \(missing_input\)/);
+});
+
+test('check rejects bad flags before any request', async () => {
+  requests.length = 0;
+  assert.equal((await run(['check', '--best-guess', 'Jennifer Null'])).code, 2);
+  assert.equal((await run(['check', '--email', 'a@b.c'])).code, 2);
+  assert.equal((await run(['check', '--language', 'en', 'Jennifer Null'])).code, 2);
   assert.equal(requests.length, 0);
 });

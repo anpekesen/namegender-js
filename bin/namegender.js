@@ -13,6 +13,7 @@ const HELP = `Usage: namegender [options] <name>...
        namegender --email <address>... | --username <handle>...
        namegender countries <name>
        namegender salutation [options] <full name>...
+       namegender check [options] <full name>...
        namegender account
        cat names.txt | namegender [options]
 
@@ -39,6 +40,13 @@ Salutation options (namegender salutation "Anna Müller" --language de):
                          50-100, default 90. Below it the neutral form is used.
   Quote each full name. The neutral form is used when the gender is not
   certain; --best-guess does not apply.
+
+Name check (namegender check "Jennifer Null"):
+  Says whether each full name looks like a real person's name: plausible,
+  suspicious or implausible, a 0-100 score, and the signals behind it. It
+  never calls a name fake; use it to flag records, not to reject people.
+  --country and --locale work as above; --csv prints
+  query,assessment,score,signals,name_type.
 
   -h, --help             Show this help.
   -v, --version          Show the version.
@@ -88,6 +96,7 @@ if (opts.json && opts.csv) fail('--json and --csv cannot be combined.', 2);
 
 const FORMS = ['formal', 'informal', 'neutral'];
 const isSalutation = parsed.positionals[0] === 'salutation';
+const isCheck = parsed.positionals[0] === 'check';
 const salutationOnly = ['language', 'form', 'gender', 'title', 'min-probability'].filter((o) => opts[o] !== undefined);
 if (!isSalutation && salutationOnly.length) fail(`--${salutationOnly[0]} works only with the salutation command.`, 2);
 if (isSalutation) {
@@ -95,6 +104,11 @@ if (isSalutation) {
   if (opts['best-guess']) fail('--best-guess does not apply to salutation: the neutral form is used when the gender is not certain.', 2);
   if (opts.form !== undefined && !FORMS.includes(opts.form)) fail(`--form must be one of ${FORMS.join(', ')}.`, 2);
   if (opts['min-probability'] !== undefined && !/^\d+$/.test(opts['min-probability'])) fail('--min-probability must be a whole number from 50 to 100.', 2);
+}
+
+if (isCheck) {
+  if (opts.email || opts.username) fail('check reads full names; --email and --username do not apply.', 2);
+  if (opts['best-guess']) fail('--best-guess does not apply to check.', 2);
 }
 
 const apiKey = opts.key || process.env.NAMEGENDER_API_KEY;
@@ -114,6 +128,11 @@ const salutationOptions = {
   ...(opts.gender ? { gender: opts.gender } : {}),
   ...(opts.title ? { title: opts.title } : {}),
   ...(opts['min-probability'] !== undefined ? { min_probability: Number(opts['min-probability']) } : {}),
+};
+
+const checkOptions = {
+  ...(opts.country ? { country: opts.country } : {}),
+  ...(opts.locale ? { locale: opts.locale } : {}),
 };
 
 async function readStdin() {
@@ -189,6 +208,47 @@ function printSalutations(results, meta) {
   printTable(header, rows);
 }
 
+// Only the signals that count against a name; info and positive ones explain
+// the score but are not a reason to look at the record. A code seen on both
+// parts is listed once.
+const concerns = (r) => [...new Set(r.signals.filter((s) => s.severity !== 'info' && s.severity !== 'positive').map((s) => s.code))];
+
+function printChecks(results, meta) {
+  if (opts.json) {
+    process.stdout.write(`${JSON.stringify(meta, null, 2)}\n`);
+    return;
+  }
+  if (opts.csv) {
+    process.stdout.write('query,assessment,score,signals,name_type\n');
+    for (const r of results) {
+      process.stdout.write([r.query, r.assessment, r.score, concerns(r).join(';'), r.name_type].map(csvCell).join(',') + '\n');
+    }
+    return;
+  }
+  printTable(['QUERY', 'ASSESSMENT', 'SCORE', 'SIGNALS'], results.map((r) => [r.query, r.assessment, r.score, concerns(r).join(', ')]));
+}
+
+async function check(values) {
+  if (values.length === 1) {
+    const result = await client.nameCheck(values[0], checkOptions);
+    printChecks([result], result);
+    return;
+  }
+
+  const results = [];
+  let last = null;
+  let charged = 0;
+  for (let i = 0; i < values.length; i += CHUNK) {
+    last = await client.nameCheckBulk(values.slice(i, i + CHUNK), checkOptions);
+    charged += last.credits_charged ?? 0;
+    results.push(...last.results);
+  }
+  // The summary of the last chunk alone would undercount; recount over all.
+  const summary = { total: results.length, plausible: 0, suspicious: 0, implausible: 0 };
+  for (const r of results) if (r.assessment in summary) summary[r.assessment]++;
+  printChecks(results, { ...last, credits_charged: charged, summary, results });
+}
+
 async function salutation(values) {
   if (values.length === 1) {
     const result = await client.salutation(values[0], salutationOptions);
@@ -249,14 +309,14 @@ async function main() {
     return;
   }
 
-  let values = isSalutation ? rest : positionals;
+  let values = isSalutation || isCheck ? rest : positionals;
   if (values.length === 0) {
     if (process.stdin.isTTY) { process.stdout.write(`${HELP}\n`); process.exit(2); }
     values = await readStdin();
     if (values.length === 0) fail('No input.', 2);
   }
 
-  await (isSalutation ? salutation(values) : lookup(values));
+  await (isSalutation ? salutation(values) : isCheck ? check(values) : lookup(values));
 }
 
 main().catch((error) => {

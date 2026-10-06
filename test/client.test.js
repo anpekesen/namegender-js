@@ -149,6 +149,90 @@ test('an unsupported salutation language throws NameGenderError with the support
   });
 });
 
+const checkResult = (overrides = {}) => ({
+  query: 'asdf qwerty', assessment: 'implausible', score: 0,
+  signals: [
+    { code: 'keyboard_pattern', severity: 'high', part: 'first_name', value: 'asdf' },
+    { code: 'single_name', severity: 'low', part: null, value: null },
+  ],
+  first_name: 'Asdf', last_name: 'Qwerty', name_type: 'personal',
+  evidence: { first_name_status: null, first_name_counted_records: 0 }, ...overrides,
+});
+
+test('nameCheck sends only the options that are set and parses the assessment', async () => {
+  let request;
+  const client = new NameGender('secret', { fetch: async (url, init) => {
+    request = { url, init };
+    return { ok: true, json: async () => ({ credits_charged: 1, credits_remaining: 4999, data_version: '2026.10', request_id: 'req_1', country_source: 'ip', ...checkResult() }) };
+  }});
+  const result = await client.nameCheck('asdf qwerty', { country: undefined, locale: null, ip: '203.0.113.7' });
+  assert.equal(request.url, 'https://namegender.com/api/v1/name-check');
+  assert.equal(request.init.method, 'POST');
+  assert.deepEqual(JSON.parse(request.init.body), { name: 'asdf qwerty', ip: '203.0.113.7' });
+  assert.equal(result.assessment, 'implausible');
+  assert.equal(result.score, 0);
+  assert.equal(result.country_source, 'ip');
+  assert.deepEqual(result.signals[0], { code: 'keyboard_pattern', severity: 'high', part: 'first_name', value: 'asdf' });
+  assert.equal(result.signals[1].part, null);
+  assert.equal(result.signals[1].value, null);
+  assert.equal(result.evidence.first_name_status, null);
+  assert.equal(result.evidence.first_name_counted_records, 0);
+});
+
+test('nameCheck takes first_name and last_name instead of name', async () => {
+  const bodies = [];
+  const client = new NameGender('secret', { fetch: async (url, init) => {
+    bodies.push(JSON.parse(init.body));
+    return { ok: true, json: async () => checkResult({ query: 'Jennifer Null', assessment: 'plausible', score: 95, signals: [],
+      first_name: 'Jennifer', last_name: 'Null', evidence: { first_name_status: 'counted', first_name_counted_records: 1500000 } }) };
+  }});
+  const a = await client.nameCheck(null, { first_name: 'Jennifer', last_name: 'Null', country: 'US' });
+  await client.nameCheck({ first_name: 'Jennifer', last_name: 'Null', locale: undefined });
+  assert.deepEqual(bodies, [
+    { first_name: 'Jennifer', last_name: 'Null', country: 'US' },
+    { first_name: 'Jennifer', last_name: 'Null' },
+  ]);
+  assert.equal(a.assessment, 'plausible');
+  assert.equal(a.evidence.first_name_status, 'counted');
+});
+
+test('nameCheckBulk keeps input order and the summary', async () => {
+  let request;
+  const client = new NameGender('secret', { fetch: async (url, init) => {
+    request = { url, init };
+    return { ok: true, json: async () => ({
+      credits_charged: 3, credits_remaining: 10, data_version: '2026.10', request_id: 'req_2', took_ms: 4, country_source: 'locale',
+      summary: { total: 3, plausible: 1, suspicious: 1, implausible: 1 },
+      results: [
+        checkResult({ query: 'Jennifer Null', assessment: 'plausible', score: 95, signals: [] }),
+        checkResult({ query: 'Test User', assessment: 'suspicious', score: 35, signals: [{ code: 'placeholder_pair', severity: 'medium', part: 'full', value: 'Test User' }] }),
+        checkResult(),
+      ],
+    }) };
+  }});
+  const result = await client.nameCheckBulk(new Set(['Jennifer Null', 'Test User', 'asdf qwerty']), { locale: 'en-US', country: undefined });
+  assert.equal(request.url, 'https://namegender.com/api/v1/name-check/bulk');
+  assert.deepEqual(JSON.parse(request.init.body), { names: ['Jennifer Null', 'Test User', 'asdf qwerty'], locale: 'en-US' });
+  assert.deepEqual(result.results.map((r) => [r.query, r.assessment]), [['Jennifer Null', 'plausible'], ['Test User', 'suspicious'], ['asdf qwerty', 'implausible']]);
+  assert.equal(result.results[1].signals[0].code, 'placeholder_pair');
+  assert.deepEqual(result.summary, { total: 3, plausible: 1, suspicious: 1, implausible: 1 });
+  assert.equal(result.took_ms, 4);
+});
+
+test('a name check without credit throws NameGenderError', async () => {
+  const { NameGenderError } = await import('../src/index.js');
+  const client = new NameGender('secret', { fetch: async () => ({
+    ok: false, status: 402, json: async () => ({ error: 'no_credits', message: 'No credits left.', request_id: 'req_3' }),
+  })});
+  await assert.rejects(() => client.nameCheckBulk(['asdf qwerty']), (error) => {
+    assert.ok(error instanceof NameGenderError);
+    assert.equal(error.status, 402);
+    assert.equal(error.message, 'No credits left.');
+    assert.equal(error.body.error, 'no_credits');
+    return true;
+  });
+});
+
 const job = (overrides = {}) => ({ id: 'B-1', status: 'queued', poll_after_seconds: 0, ...overrides });
 
 test('uploads a file as multipart with an idempotency key', async () => {

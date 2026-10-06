@@ -84,6 +84,50 @@ export interface SalutationBulkResponse extends Envelope {
   /** In input order. */
   results: SalutationResult[];
 }
+export interface NameCheckOptions {
+  /** Country hint, as in `Options`. */
+  country?: string;
+  locale?: string;
+  ip?: string;
+}
+export interface NameCheckSingleOptions extends NameCheckOptions {
+  /** Instead of `name`, when the parts are stored separately. Not parsed. */
+  first_name?: string;
+  last_name?: string;
+}
+export type NameCheckSignalCode = 'keyboard_pattern'|'repeated_characters'|'placeholder'|'placeholder_pair'|'fictional_character'|'profanity'
+  |'contains_url_or_email'|'contains_digits'|'contains_symbols'|'organization_name'|'too_long'|'no_vowels'
+  |'same_first_and_last'|'initials_only'|'single_name'|'first_name_not_found'|'first_name_attested'|'script_not_covered';
+export interface NameCheckSignal {
+  code: NameCheckSignalCode;
+  severity: 'high'|'medium'|'low'|'info'|'positive';
+  /** Which part of the name the signal is about; null when it is not tied to one. */
+  part: 'full'|'first_name'|'last_name'|null;
+  value: string | null;
+}
+/**
+ * Whether a name typed into a form looks like a real person's name. It never
+ * calls a name fake: use it to flag records for review, not to reject people.
+ */
+export interface NameCheckResult {
+  query: string;
+  assessment: 'plausible'|'suspicious'|'implausible';
+  /** 0–100. */
+  score: number;
+  signals: NameCheckSignal[];
+  first_name: string | null;
+  last_name: string | null;
+  name_type: 'personal'|'organization'|'role';
+  evidence: { first_name_status: 'counted'|'attested'|'not_found'|null; first_name_counted_records: number };
+}
+export interface NameCheckResponse extends Envelope, NameCheckResult { country_source: CountrySource }
+export interface NameCheckBulkResponse extends Envelope {
+  took_ms: number;
+  country_source: CountrySource;
+  summary: { total: number; plausible: number; suspicious: number; implausible: number };
+  /** In input order. */
+  results: NameCheckResult[];
+}
 export interface CountryRegistration { country: string; count: number; share: number; gender: 'male'|'female'|null; probability: number; source: string }
 /**
  * Country distribution of a name. Not a country-of-origin or ethnicity inference:
@@ -220,6 +264,11 @@ export class NameGender {
   salutation(options: SalutationSingleOptions & { name?: string }): Promise<SalutationResponse>;
   /** 1–100 names, one credit each; the options apply to every name. */
   salutationBulk(names: string | Iterable<string>, options?: SalutationOptions): Promise<SalutationBulkResponse>;
+  /** One credit. Pass `null` as `name` (or only the options) to send `first_name` and `last_name` instead. */
+  nameCheck(name: string | null, options?: NameCheckSingleOptions): Promise<NameCheckResponse>;
+  nameCheck(options: NameCheckSingleOptions & { name?: string }): Promise<NameCheckResponse>;
+  /** 1–100 names, one credit each; the options apply to every name. */
+  nameCheckBulk(names: string | Iterable<string>, options?: NameCheckOptions): Promise<NameCheckBulkResponse>;
   account(): Promise<AccountResponse>;
   /** File jobs: upload a CSV or XLSX file, get it back with gender columns added. */
   readonly batches: Batches;

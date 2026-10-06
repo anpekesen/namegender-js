@@ -31,6 +31,7 @@ npx namegender --email jane.doe@example.com
 cat names.txt | npx namegender --csv > genders.csv
 npx namegender countries Mehmet
 npx namegender salutation "Ahmet Yılmaz" --language tr
+npx namegender check "asdf qwerty" "Jennifer Null"
 npx namegender account
 ```
 
@@ -50,6 +51,11 @@ results included. Run `npx namegender --help` for all options.
 name; `--form informal` or `--form neutral` picks another form, and
 `--language`, `--country`, `--gender`, `--title` and `--min-probability` work
 as in the client. `--csv` prints `query,salutation,form,reason,gender,language`.
+
+`namegender check` prints the assessment, score and the signals that count
+against each quoted full name (info and positive signals are left out of the
+table). `--country` and `--locale` work as in the client; `--json` prints the
+full response and `--csv` prints `query,assessment,score,signals,name_type`.
 
 ## Options and response
 
@@ -107,6 +113,34 @@ default 90) and `title`.
 One credit per name. When the gender is not certain the gendered form is not
 guessed: `form` is `'neutral'` and `reason` says why (`'gender_unknown'`,
 `'below_min_probability'`, ...). `best_guess` does not apply to salutations.
+
+## Name check
+
+Says whether a name typed into a form looks like a real person's name, and why.
+
+```js
+const a = await client.nameCheck('asdf qwerty');
+console.log(a.assessment, a.score);   // 'implausible' 0
+console.log(a.signals[0]);            // { code: 'keyboard_pattern', severity: 'high', part: 'first_name', value: 'asdf' }
+
+const b = await client.nameCheck('Jennifer Null');
+console.log(b.assessment);            // 'plausible'
+
+// Parts stored separately: no parsing is done.
+await client.nameCheck(null, { first_name: 'Jennifer', last_name: 'Null', country: 'US' });
+
+const list = await client.nameCheckBulk(['Jennifer Null', 'asdf qwerty'], { locale: 'en-US' }); // up to 100
+console.log(list.summary); // { total: 2, plausible: 1, suspicious: 0, implausible: 1 }
+```
+
+`assessment` is `'plausible'`, `'suspicious'` or `'implausible'`; `score` is
+0–100; each signal has a `code`, a `severity` (`high`, `medium`, `low`, `info`
+or `positive`), the `part` it is about and the `value` it matched (both may be
+null). Options are `country`, `locale` and `ip`.
+
+One credit per name. It never calls a name fake: use it to flag records for a
+look, not to reject people automatically. First names are checked against the
+name data; surnames are judged by their shape only.
 
 ## Country distribution
 

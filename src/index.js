@@ -223,6 +223,16 @@ export class NameGender {
     const list = typeof names === 'string' ? [names] : Array.from(names);
     return this.#post('/salutation/bulk', setOnly({ names: list, ...options }));
   }
+  // Same shapes as salutation: a name, or null (or one options object) with
+  // first_name and last_name. Options left undefined or null are not sent.
+  nameCheck(name, options = {}) {
+    if (name !== null && typeof name === 'object') return this.#post('/name-check', setOnly(name));
+    return this.#post('/name-check', setOnly({ name, ...options }));
+  }
+  nameCheckBulk(names, options = {}) {
+    const list = typeof names === 'string' ? [names] : Array.from(names);
+    return this.#post('/name-check/bulk', setOnly({ names: list, ...options }));
+  }
   account() { return this.#request('/me', { method: 'GET' }); }
 
   async #post(path, body) {
