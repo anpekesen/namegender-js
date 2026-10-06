@@ -59,11 +59,12 @@ export const webhooks = {
     }
 
     const bytes = toBytes(rawBody);
-    const key = await globalThis.crypto.subtle.importKey('raw', encoder.encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+    const subtle = await webCrypto();
+    const key = await subtle.importKey('raw', encoder.encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
     const signed = new Uint8Array(encoder.encode(`${timestamp}.`).length + bytes.length);
     signed.set(encoder.encode(`${timestamp}.`));
     signed.set(bytes, encoder.encode(`${timestamp}.`).length);
-    const mac = new Uint8Array(await globalThis.crypto.subtle.sign('HMAC', key, signed));
+    const mac = new Uint8Array(await subtle.sign('HMAC', key, signed));
     const expected = Array.from(mac, (b) => b.toString(16).padStart(2, '0')).join('');
 
     if (!signatures.some((signature) => safeEqual(signature, expected))) {
@@ -88,6 +89,10 @@ const sleep = (ms, signal) => new Promise((resolve, reject) => {
   const timer = setTimeout(resolve, ms);
   signal?.addEventListener('abort', () => { clearTimeout(timer); reject(signal.reason); }, { once: true });
 });
+
+// Node 18 has Web Crypto only under node:crypto; Node 20+, Deno, Bun and
+// browsers expose it globally. The import runs only where it is missing.
+const webCrypto = async () => globalThis.crypto?.subtle ?? (await import('node:crypto')).webcrypto.subtle;
 
 const newIdempotencyKey = () => globalThis.crypto?.randomUUID?.()
   ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
