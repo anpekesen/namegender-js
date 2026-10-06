@@ -18,13 +18,52 @@ keep it on the server. A key in browser code can be copied and spent by anyone
 who opens the page; restrict a key to your server's IP addresses in the
 dashboard if you can.
 
+## Command line
+
+The package ships a `namegender` command. Keep the key in an environment
+variable; a key typed on the command line ends up in your shell history.
+
+```sh
+export NAMEGENDER_API_KEY=ng_live_...
+npx namegender Andrea --country IT
+npx namegender Emma Liam Andrea
+npx namegender --email jane.doe@example.com
+cat names.txt | npx namegender --csv > genders.csv
+npx namegender countries Mehmet
+npx namegender account
+```
+
+```
+$ npx namegender Emma
+QUERY  GENDER  PROB  SAMPLE
+Emma   female  100%  1,201,635
+```
+
+Each non-empty line on stdin is one value; lists longer than 100 are sent in
+bulk requests of 100. `--json` prints the API response, `--csv` prints
+`query,gender,probability,sample_size,country`, and `--locale it-IT` or
+`--best-guess` work as in the client. Every value costs one credit, unknown
+results included. Run `npx namegender --help` for all options.
+
 ## Options and response
 
-`name`, `email`, `username` and `bulk` accept `country`, `ai_fallback` and
-`best_guess`:
+`name`, `email`, `username` and `bulk` accept `country`, `locale`, `ip`,
+`ai_fallback` and `best_guess`:
 
 ```js
 const result = await client.name('Andrea', { country: 'IT', best_guess: true });
+```
+
+When you do not know the country, pass what you have: `locale` is a language
+tag such as the browser's `navigator.language` (its region becomes the country;
+`en` without a region sets none), and `ip` is the end user's IP address, used
+only when neither `country` nor a regional `locale` is sent and never stored.
+`country_source` in the response says which one was used: `'country'`,
+`'locale'`, `'ip'` or `null`.
+
+```js
+const result = await client.name('Andrea', { locale: 'it-IT' });
+console.log(result.gender, result.country_source); // 'male' 'locale'
 ```
 
 A result carries `query`, `name`, `first_name`, `middle_name`, `last_name`, `name_type`, `gender`, `country`, `probability`,

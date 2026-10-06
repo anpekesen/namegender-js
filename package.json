@@ -1,13 +1,17 @@
 {
   "name": "namegender",
-  "version": "0.5.1",
+  "version": "0.6.0",
   "description": "Official JavaScript client for the NameGender API",
   "type": "module",
   "main": "src/index.js",
   "exports": "./src/index.js",
   "types": "src/index.d.ts",
+  "bin": {
+    "namegender": "bin/namegender.js"
+  },
   "files": [
     "src",
+    "bin",
     "README.md",
     "LICENSE"
   ],
@@ -15,7 +19,7 @@
     "test": "node --test"
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=18.3"
   },
   "sideEffects": false,
   "keywords": [
@@ -23,7 +27,8 @@
     "name",
     "api",
     "namegender",
-    "typescript"
+    "typescript",
+    "cli"
   ],
   "author": "NameGender <support@namegender.com>",
   "license": "MIT",

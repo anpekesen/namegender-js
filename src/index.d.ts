@@ -1,5 +1,10 @@
 export interface Options {
+  /** ISO 3166-1 alpha-2 code. Always wins over `locale` and `ip`. */
   country?: string;
+  /** Language tag such as `it-IT`; its region is the country when `country` is not sent. `en` sets none. */
+  locale?: string;
+  /** End user IP address; its country is used when neither `country` nor a regional `locale` is sent. Not stored. */
+  ip?: string;
   /** Fall back to a language model when the name is not in the database. Requires AI consent on the account. */
   ai_fallback?: boolean;
   /** Return the most likely gender even when probability is below the threshold. */
@@ -24,9 +29,12 @@ export interface GenderResult {
   middle_name: string | null;
   last_name: string | null;
 }
-export interface GenderResponse extends Envelope, GenderResult {}
+/** Where the country came from; null when the answer is worldwide. */
+export type CountrySource = 'country'|'locale'|'ip'|null;
+export interface GenderResponse extends Envelope, GenderResult { country_source: CountrySource }
 export interface BulkResponse extends Envelope {
   took_ms: number;
+  country_source: CountrySource;
   summary: { total: number; identified: number; unknown: number; match_rate: number };
   results: GenderResult[];
 }
