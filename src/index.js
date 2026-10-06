@@ -74,6 +74,8 @@ export const webhooks = {
   },
 };
 
+const setOnly = (body) => Object.fromEntries(Object.entries(body).filter(([, v]) => v !== undefined && v !== null));
+
 const FINISHED = new Set(['completed', 'failed', 'cancelled']);
 
 // Statuses worth retrying an upload for: the request may never have reached
@@ -205,6 +207,17 @@ export class NameGender {
     return this.#post('/gender/bulk', { names: list, ...options });
   }
   countries(name, options = {}) { return this.#post('/gender/countries', { name, ...options }); }
+  // Pass first_name and last_name in options (and null or an options object
+  // as the first argument) when the parts are stored separately. Options left
+  // undefined or null are not sent.
+  salutation(name, options = {}) {
+    if (name !== null && typeof name === 'object') return this.#post('/salutation', setOnly(name));
+    return this.#post('/salutation', setOnly({ name, ...options }));
+  }
+  salutationBulk(names, options = {}) {
+    const list = typeof names === 'string' ? [names] : Array.from(names);
+    return this.#post('/salutation/bulk', setOnly({ names: list, ...options }));
+  }
   account() { return this.#request('/me', { method: 'GET' }); }
 
   async #post(path, body) {

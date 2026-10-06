@@ -38,6 +38,52 @@ export interface BulkResponse extends Envelope {
   summary: { total: number; identified: number; unknown: number; match_rate: number };
   results: GenderResult[];
 }
+export interface SalutationOptions {
+  /** Language of the salutation: en, en-US, en-GB, de, de-AT, de-CH, fr, es, it, pt, pt-PT, pt-BR, nl, tr, pl, ja. Default: the language of `locale`, else the main language of the country, else en. Anything else is a 422. */
+  language?: string;
+  /** Country hint for the gender lookup, as in `Options`. */
+  country?: string;
+  locale?: string;
+  ip?: string;
+  /** Known gender; skips the lookup. `neutral` always gives the neutral form. */
+  gender?: 'male'|'female'|'neutral';
+  /** 50–100, default 90. Below it the neutral form is used. */
+  min_probability?: number;
+  /** Academic title kept in a separate field, e.g. `Dr.`; used in de and en. */
+  title?: string;
+}
+export interface SalutationSingleOptions extends SalutationOptions {
+  /** Instead of `name`, when the parts are stored separately. Not parsed. */
+  first_name?: string;
+  last_name?: string;
+}
+export type SalutationReason = 'gender_unknown'|'below_min_probability'|'gender_neutral_requested'|'no_surname'|'no_given_name'|'language_ungendered';
+export interface SalutationResult {
+  query: string;
+  language: string;
+  form: 'gendered'|'neutral'|'organization';
+  /** Why the form is not gendered; null when it is. */
+  reason: SalutationReason | null;
+  salutation: { formal: string; informal: string; neutral: string };
+  parts: { opening: string | null; courtesy: string | null; academic: string | null; name: string | null };
+  gender: 'male'|'female'|null;
+  gender_source: 'lookup'|'input'|'title'|null;
+  probability: number | null;
+  confidence: string | null;
+  first_name: string | null;
+  last_name: string | null;
+  name_type: 'personal'|'organization'|'role';
+  country: string | null;
+}
+export interface SalutationResponse extends Envelope, SalutationResult { country_source: CountrySource }
+export interface SalutationBulkResponse extends Envelope {
+  took_ms: number;
+  country_source: CountrySource;
+  language: string;
+  summary: { total: number; gendered: number; neutral: number; organization: number };
+  /** In input order. */
+  results: SalutationResult[];
+}
 export interface CountryRegistration { country: string; count: number; share: number; gender: 'male'|'female'|null; probability: number; source: string }
 /**
  * Country distribution of a name. Not a country-of-origin or ethnicity inference:
@@ -169,6 +215,11 @@ export class NameGender {
   username(username: string, options?: Options): Promise<GenderResponse>;
   bulk(names: string | Iterable<string>, options?: Options): Promise<BulkResponse>;
   countries(name: string, options?: CountriesOptions): Promise<CountriesResponse>;
+  /** One credit. Pass `null` as `name` (or only the options) to send `first_name` and `last_name` instead. */
+  salutation(name: string | null, options?: SalutationSingleOptions): Promise<SalutationResponse>;
+  salutation(options: SalutationSingleOptions & { name?: string }): Promise<SalutationResponse>;
+  /** 1–100 names, one credit each; the options apply to every name. */
+  salutationBulk(names: string | Iterable<string>, options?: SalutationOptions): Promise<SalutationBulkResponse>;
   account(): Promise<AccountResponse>;
   /** File jobs: upload a CSV or XLSX file, get it back with gender columns added. */
   readonly batches: Batches;

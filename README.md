@@ -30,6 +30,7 @@ npx namegender Emma Liam Andrea
 npx namegender --email jane.doe@example.com
 cat names.txt | npx namegender --csv > genders.csv
 npx namegender countries Mehmet
+npx namegender salutation "Ahmet Yılmaz" --language tr
 npx namegender account
 ```
 
@@ -44,6 +45,11 @@ bulk requests of 100. `--json` prints the API response, `--csv` prints
 `query,gender,probability,sample_size,country`, and `--locale it-IT` or
 `--best-guess` work as in the client. Every value costs one credit, unknown
 results included. Run `npx namegender --help` for all options.
+
+`namegender salutation` prints the formal salutation for each quoted full
+name; `--form informal` or `--form neutral` picks another form, and
+`--language`, `--country`, `--gender`, `--title` and `--min-probability` work
+as in the client. `--csv` prints `query,salutation,form,reason,gender,language`.
 
 ## Options and response
 
@@ -72,6 +78,35 @@ A result carries `query`, `name`, `first_name`, `middle_name`, `last_name`, `nam
 Success is the HTTP status: any non-2xx response throws a `NameGenderError`
 whose `body` is `{ error, message, request_id, docs }`. Branch on `body.error`,
 not on `message`.
+
+## Salutation
+
+Builds the opening line of a letter or email from a full name. Titles in the
+name are recognised; the formal, informal and neutral forms all come back.
+
+```js
+const de = await client.salutation('Dr. Anna Müller', { language: 'de' });
+console.log(de.salutation.formal);   // 'Sehr geehrte Frau Dr. Müller,'
+
+const tr = await client.salutation('Ahmet Yılmaz', { language: 'tr' });
+console.log(tr.salutation.formal);   // 'Sayın Ahmet Bey,'
+
+// Parts stored separately: no parsing is done.
+await client.salutation(null, { first_name: 'Anna', last_name: 'Müller', title: 'Dr.', language: 'de' });
+
+const list = await client.salutationBulk(['Ahmet Yılmaz', 'Acme A.Ş.'], { language: 'tr' }); // up to 100
+console.log(list.summary); // { total: 2, gendered: 1, neutral: 0, organization: 1 }
+```
+
+Options are `language` (en, en-US, en-GB, de, de-AT, de-CH, fr, es, it, pt,
+pt-PT, pt-BR, nl, tr, pl, ja; anything else is a 422 `NameGenderError` whose
+`body.supported` lists them), `country`, `locale`, `ip`, `gender` (`'male'`,
+`'female'` or `'neutral'`, skipping the lookup), `min_probability` (50–100,
+default 90) and `title`.
+
+One credit per name. When the gender is not certain the gendered form is not
+guessed: `form` is `'neutral'` and `reason` says why (`'gender_unknown'`,
+`'below_min_probability'`, ...). `best_guess` does not apply to salutations.
 
 ## Country distribution
 

@@ -19,6 +19,30 @@ function result(query, country = null) {
   };
 }
 
+// "Acme GmbH" is an organization, "Kim Lee" has no certain gender.
+function salutation(query, language = 'tr') {
+  if (query === 'Acme GmbH') {
+    return { query, language, form: 'organization', reason: null,
+      salutation: { formal: 'Sayın Yetkili,', informal: 'Merhaba,', neutral: 'Sayın Yetkili,' },
+      parts: { opening: 'Sayın', courtesy: null, academic: null, name: null },
+      gender: null, gender_source: null, probability: null, confidence: null,
+      first_name: null, last_name: null, name_type: 'organization', country: null };
+  }
+  const [first, last] = query.split(' ');
+  if (query === 'Kim Lee') {
+    return { query, language, form: 'neutral', reason: 'gender_unknown',
+      salutation: { formal: `Sayın ${first} ${last},`, informal: `Merhaba ${first},`, neutral: `Sayın ${first} ${last},` },
+      parts: { opening: 'Sayın', courtesy: null, academic: null, name: `${first} ${last}` },
+      gender: null, gender_source: null, probability: null, confidence: null,
+      first_name: first, last_name: last, name_type: 'personal', country: null };
+  }
+  return { query, language, form: 'gendered', reason: null,
+    salutation: { formal: `Sayın ${first} Bey,`, informal: `Merhaba ${first},`, neutral: `Sayın ${first} ${last},` },
+    parts: { opening: 'Sayın', courtesy: 'Bey', academic: null, name: first },
+    gender: 'male', gender_source: 'lookup', probability: 99, confidence: 'high',
+    first_name: first, last_name: last ?? null, name_type: 'personal', country: 'TR' };
+}
+
 before(async () => {
   server = createServer((req, res) => {
     let raw = '';
@@ -38,6 +62,23 @@ before(async () => {
         res.end(JSON.stringify({ ...envelope, took_ms: 2, country_source: body.country ? 'country' : null,
           summary: { total: body.names.length, identified: body.names.length, unknown: 0, match_rate: 100 },
           results: body.names.map((n) => result(n, country)) }));
+        return;
+      }
+      if (req.url === '/salutation/bulk') {
+        const results = body.names.map((n) => salutation(n, body.language));
+        const count = (form) => results.filter((r) => r.form === form).length;
+        res.end(JSON.stringify({ ...envelope, credits_charged: results.length, took_ms: 2, country_source: null, language: body.language,
+          summary: { total: results.length, gendered: count('gendered'), neutral: count('neutral'), organization: count('organization') },
+          results }));
+        return;
+      }
+      if (req.url === '/salutation') {
+        if (body.language === 'xx') {
+          res.statusCode = 422;
+          res.end(JSON.stringify({ error: 'invalid_input', message: 'Unsupported language.', field: 'language', supported: ['en', 'tr'] }));
+          return;
+        }
+        res.end(JSON.stringify({ ...envelope, country_source: body.country ? 'country' : null, ...salutation(body.name, body.language) }));
         return;
       }
       if (req.url === '/me') {
@@ -150,5 +191,62 @@ test('conflicting flags are rejected before any request', async () => {
   requests.length = 0;
   const { code } = await run(['--email', '--username', 'x']);
   assert.equal(code, 2);
+  assert.equal(requests.length, 0);
+});
+
+test('salutation prints the formal form and sends only the set options', async () => {
+  requests.length = 0;
+  const { code, stdout } = await run(['salutation', 'Ahmet Yılmaz', '--language', 'tr', '--country', 'TR']);
+  assert.equal(code, 0);
+  assert.equal(requests[0].url, '/salutation');
+  assert.deepEqual(requests[0].body, { name: 'Ahmet Yılmaz', language: 'tr', country: 'TR' });
+  assert.equal(stdout, 'QUERY         SALUTATION        FORM\nAhmet Yılmaz  Sayın Ahmet Bey,  gendered\n');
+});
+
+test('salutation --form picks the form and shows the reason when one is neutral', async () => {
+  requests.length = 0;
+  const { code, stdout } = await run(['salutation', '--form', 'informal', '--title', 'Dr.', '--gender', 'male', '--min-probability', '80', 'Ahmet Yılmaz', 'Kim Lee']);
+  assert.equal(code, 0);
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].url, '/salutation/bulk');
+  assert.deepEqual(requests[0].body, { names: ['Ahmet Yılmaz', 'Kim Lee'], gender: 'male', title: 'Dr.', min_probability: 80 });
+  assert.match(stdout, /QUERY\s+SALUTATION\s+FORM\s+REASON/);
+  assert.match(stdout, /Ahmet Yılmaz\s+Merhaba Ahmet,\s+gendered\n/);
+  assert.match(stdout, /Kim Lee\s+Merhaba Kim,\s+neutral\s+gender_unknown/);
+});
+
+test('salutation reads stdin in chunks of 100 and totals the summary', async () => {
+  requests.length = 0;
+  const names = Array.from({ length: 150 }, (_, i) => (i === 0 ? 'Acme GmbH' : `Ali Veli${i}`));
+  const { code, stdout } = await run(['salutation', '--json', '--language', 'tr'], { input: `${names.join('\n')}\n\n` });
+  assert.equal(code, 0);
+  assert.deepEqual(requests.map((r) => [r.url, r.body.names.length]), [['/salutation/bulk', 100], ['/salutation/bulk', 50]]);
+  const out = JSON.parse(stdout);
+  assert.equal(out.results.length, 150);
+  assert.equal(out.results[0].query, 'Acme GmbH');
+  assert.equal(out.results[149].query, 'Ali Veli149');
+  assert.equal(out.credits_charged, 150);
+  assert.deepEqual(out.summary, { total: 150, gendered: 149, neutral: 0, organization: 1 });
+});
+
+test('salutation csv prints the chosen form', async () => {
+  const { code, stdout } = await run(['salutation', '--csv', '--form', 'neutral'], { input: 'Ahmet Yılmaz\nAcme GmbH\n' });
+  assert.equal(code, 0);
+  assert.equal(stdout, 'query,salutation,form,reason,gender,language\nAhmet Yılmaz,"Sayın Ahmet Yılmaz,",gendered,,male,tr\nAcme GmbH,"Sayın Yetkili,",organization,,,tr\n');
+});
+
+test('salutation surfaces an unsupported language as an API error', async () => {
+  const { code, stdout, stderr } = await run(['salutation', 'Ahmet Yılmaz', '--language', 'xx']);
+  assert.equal(code, 1);
+  assert.equal(stdout, '');
+  assert.match(stderr, /Unsupported language\. \(invalid_input\)/);
+});
+
+test('salutation rejects bad flags before any request', async () => {
+  requests.length = 0;
+  assert.equal((await run(['salutation', '--form', 'casual', 'Ahmet Yılmaz'])).code, 2);
+  assert.equal((await run(['salutation', '--best-guess', 'Ahmet Yılmaz'])).code, 2);
+  assert.equal((await run(['salutation', '--email', 'a@b.c'])).code, 2);
+  assert.equal((await run(['--language', 'tr', 'Ahmet'])).code, 2);
   assert.equal(requests.length, 0);
 });
