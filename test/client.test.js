@@ -349,3 +349,35 @@ test('rejects a tampered body, a wrong secret, an old timestamp and a missing he
   await reject(VECTOR.body, 't=abc,v1=', VECTOR.secret, { now: VECTOR.now });
   await assert.rejects(() => webhooks.verify({ id: 'evt_1' }, VECTOR.header, VECTOR.secret, { now: VECTOR.now }), TypeError);
 });
+
+test('age sends only the options that are set and returns both ranges', async () => {
+  let request;
+  const client = new NameGender('secret', { fetch: async (url, init) => {
+    request = { url, init };
+    return { ok: true, json: async () => ({ credits_charged: 1, credits_remaining: 4999, request_id: 'req_1',
+      name: 'Leslie', first_name: 'Leslie', gender: 'male', age: 66, age_range: { low: 55, high: 74 },
+      age_range_80: { low: 41, high: 81 }, birth_year: 1960, sample_size: 48379, births: 62000, country: 'US',
+      country_source: 'default', source: 'ssa', series: '1880-2024', reference_year: 2026, reason: null }) };
+  }});
+  const result = await client.age('Leslie', { gender: 'male', country: undefined, locale: null });
+  assert.equal(request.url, 'https://namegender.com/api/v1/age');
+  assert.equal(request.init.method, 'POST');
+  assert.deepEqual(JSON.parse(request.init.body), { name: 'Leslie', gender: 'male' });
+  assert.equal(result.age, 66);
+  assert.deepEqual(result.age_range, { low: 55, high: 74 });
+  assert.equal(result.country_source, 'default');
+});
+
+test('ageBulk takes a single string or any iterable', async () => {
+  const bodies = [];
+  const client = new NameGender('secret', { fetch: async (url, init) => {
+    bodies.push([url, JSON.parse(init.body)]);
+    return { ok: true, json: async () => ({ credits_charged: 0, credits_remaining: 10, request_id: 'r', country_source: 'country', results: [] }) };
+  }});
+  await client.ageBulk('Kari', { country: 'NO' });
+  await client.ageBulk(new Set(['Jean', 'Kevin']), { country: 'FR' });
+  assert.deepEqual(bodies, [
+    ['https://namegender.com/api/v1/age/bulk', { names: ['Kari'], country: 'NO' }],
+    ['https://namegender.com/api/v1/age/bulk', { names: ['Jean', 'Kevin'], country: 'FR' }],
+  ]);
+});

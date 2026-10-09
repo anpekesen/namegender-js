@@ -64,6 +64,17 @@ function nameCheck(query) {
   return { ...base, assessment: 'plausible', score: 92, signals: [{ code: 'first_name_attested', severity: 'positive', part: 'first_name', value: first }] };
 }
 
+// Brittany is a 1990 name; DE is not covered; Xqzv is not in the series.
+function ageResult(name, country = 'US', gender = null) {
+  const base = { name, first_name: name, gender, age: null, age_range: null, age_range_80: null, birth_year: null,
+    sample_size: 0, births: 0, country, country_source: country === 'US' ? 'default' : 'country',
+    source: country === 'DE' ? null : 'ssa', series: country === 'DE' ? null : '1880-2024', reference_year: 2026, reason: null };
+  if (country === 'DE') return { ...base, reason: 'country_not_covered' };
+  if (name === 'Xqzv') return { ...base, reason: 'not_found' };
+  return { ...base, age: 36, age_range: { low: 32, high: 38 }, age_range_80: { low: 28, high: 41 }, birth_year: 1990,
+    sample_size: 353775, births: 361434 };
+}
+
 before(async () => {
   server = createServer((req, res) => {
     let raw = '';
@@ -117,6 +128,17 @@ before(async () => {
           return;
         }
         res.end(JSON.stringify({ ...envelope, country_source: body.country ? 'country' : body.locale ? 'locale' : null, ...nameCheck(body.name) }));
+        return;
+      }
+      if (req.url === '/age/bulk') {
+        const results = body.names.map((n) => ageResult(n, body.country, body.gender ?? null));
+        res.end(JSON.stringify({ credits_charged: body.country === 'DE' ? 0 : results.length, credits_remaining: 99, request_id: 'req_1',
+          country_source: results[0].country_source, results }));
+        return;
+      }
+      if (req.url === '/age') {
+        res.end(JSON.stringify({ credits_charged: body.country === 'DE' ? 0 : 1, credits_remaining: 99, request_id: 'req_1',
+          ...ageResult(body.name, body.country, body.gender ?? null) }));
         return;
       }
       if (req.url === '/me') {
@@ -342,5 +364,50 @@ test('check rejects bad flags before any request', async () => {
   assert.equal((await run(['check', '--best-guess', 'Jennifer Null'])).code, 2);
   assert.equal((await run(['check', '--email', 'a@b.c'])).code, 2);
   assert.equal((await run(['check', '--language', 'en', 'Jennifer Null'])).code, 2);
+  assert.equal(requests.length, 0);
+});
+
+test('age prints the median next to the middle half and the middle 80%', async () => {
+  requests.length = 0;
+  const { code, stdout } = await run(['age', 'Brittany']);
+  assert.equal(code, 0);
+  assert.deepEqual(requests[0].body, { name: 'Brittany' });
+  assert.equal(stdout, 'NAME      COUNTRY  AGE  MIDDLE HALF  MIDDLE 80%\nBrittany  US       36   32-38        28-41\n');
+});
+
+test('age sends country and gender, and shows the reason when there is no age', async () => {
+  requests.length = 0;
+  const { code, stdout } = await run(['age', '--country', 'DE', '--gender', 'female', 'Andrea', 'Xqzv']);
+  assert.equal(code, 0);
+  assert.deepEqual(requests[0].body, { names: ['Andrea', 'Xqzv'], country: 'DE', gender: 'female' });
+  assert.match(stdout, /^NAME\s+COUNTRY\s+AGE\s+MIDDLE HALF\s+MIDDLE 80%\s+REASON\n/);
+  assert.match(stdout, /Andrea\s+DE\s+country_not_covered/);
+});
+
+test('age reads stdin in chunks of 100 and sums the credits', async () => {
+  requests.length = 0;
+  const input = Array.from({ length: 150 }, (_, i) => (i === 149 ? 'Xqzv' : `Brittany${i}`)).join('\n');
+  const { code, stdout } = await run(['age', '--json'], { input });
+  assert.equal(code, 0);
+  assert.deepEqual(requests.map((r) => [r.url, r.body.names.length]), [['/age/bulk', 100], ['/age/bulk', 50]]);
+  const out = JSON.parse(stdout);
+  assert.equal(out.results.length, 150);
+  assert.equal(out.credits_charged, 150);
+  assert.equal(out.results[149].reason, 'not_found');
+});
+
+test('age csv prints both ranges', async () => {
+  const { code, stdout } = await run(['age', '--csv'], { input: 'Brittany\nXqzv\n' });
+  assert.equal(code, 0);
+  assert.equal(stdout, 'query,country,age,age_low,age_high,age_80_low,age_80_high,birth_year,sample_size,reason\n'
+    + 'Brittany,US,36,32,38,28,41,1990,353775,\nXqzv,US,,,,,,,0,not_found\n');
+});
+
+test('age rejects bad flags before any request', async () => {
+  requests.length = 0;
+  assert.equal((await run(['age', '--gender', 'neutral', 'Leslie'])).code, 2);
+  assert.equal((await run(['age', '--email', 'a@b.c'])).code, 2);
+  assert.equal((await run(['age', '--language', 'en', 'Leslie'])).code, 2);
+  assert.equal((await run(['--gender', 'male', 'Leslie'])).code, 2);
   assert.equal(requests.length, 0);
 });

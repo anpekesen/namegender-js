@@ -14,6 +14,7 @@ const HELP = `Usage: namegender [options] <name>...
        namegender countries <name>
        namegender salutation [options] <full name>...
        namegender check [options] <full name>...
+       namegender age [options] <name>...
        namegender account
        cat names.txt | namegender [options]
 
@@ -47,6 +48,13 @@ Name check (namegender check "Jennifer Null"):
   never calls a name fake; use it to flag records, not to reject people.
   --country and --locale work as above; --csv prints
   query,assessment,score,signals,name_type.
+
+Age (namegender age Brittany --country US):
+  How old the living people with each first name are: the median age, the
+  middle half and the middle 80%. It describes a group, not a person.
+  Covered: US, FR, NO; without --country or --locale the US series is used.
+  --gender male|female uses one gender's records. --csv prints
+  query,country,age,age_low,age_high,age_80_low,age_80_high,birth_year,sample_size,reason.
 
   -h, --help             Show this help.
   -v, --version          Show the version.
@@ -97,7 +105,10 @@ if (opts.json && opts.csv) fail('--json and --csv cannot be combined.', 2);
 const FORMS = ['formal', 'informal', 'neutral'];
 const isSalutation = parsed.positionals[0] === 'salutation';
 const isCheck = parsed.positionals[0] === 'check';
-const salutationOnly = ['language', 'form', 'gender', 'title', 'min-probability'].filter((o) => opts[o] !== undefined);
+const isAge = parsed.positionals[0] === 'age';
+// --gender is shared with age; the rest belong to salutation alone.
+const salutationOnly = ['language', 'form', 'gender', 'title', 'min-probability']
+  .filter((o) => opts[o] !== undefined && !(isAge && o === 'gender'));
 if (!isSalutation && salutationOnly.length) fail(`--${salutationOnly[0]} works only with the salutation command.`, 2);
 if (isSalutation) {
   if (opts.email || opts.username) fail('salutation reads full names; --email and --username do not apply.', 2);
@@ -109,6 +120,12 @@ if (isSalutation) {
 if (isCheck) {
   if (opts.email || opts.username) fail('check reads full names; --email and --username do not apply.', 2);
   if (opts['best-guess']) fail('--best-guess does not apply to check.', 2);
+}
+
+if (isAge) {
+  if (opts.email || opts.username) fail('age reads names; --email and --username do not apply.', 2);
+  if (opts['best-guess']) fail('--best-guess does not apply to age.', 2);
+  if (opts.gender !== undefined && !['male', 'female'].includes(opts.gender)) fail('--gender must be male or female for age.', 2);
 }
 
 const apiKey = opts.key || process.env.NAMEGENDER_API_KEY;
@@ -133,6 +150,12 @@ const salutationOptions = {
 const checkOptions = {
   ...(opts.country ? { country: opts.country } : {}),
   ...(opts.locale ? { locale: opts.locale } : {}),
+};
+
+const ageOptions = {
+  ...(opts.country ? { country: opts.country } : {}),
+  ...(opts.locale ? { locale: opts.locale } : {}),
+  ...(opts.gender ? { gender: opts.gender } : {}),
 };
 
 async function readStdin() {
@@ -249,6 +272,48 @@ async function check(values) {
   printChecks(results, { ...last, credits_charged: charged, summary, results });
 }
 
+function printAges(results, meta) {
+  if (opts.json) {
+    process.stdout.write(`${JSON.stringify(meta, null, 2)}\n`);
+    return;
+  }
+  if (opts.csv) {
+    process.stdout.write('query,country,age,age_low,age_high,age_80_low,age_80_high,birth_year,sample_size,reason\n');
+    for (const r of results) {
+      process.stdout.write([r.name, r.country, r.age, r.age_range?.low, r.age_range?.high, r.age_range_80?.low,
+        r.age_range_80?.high, r.birth_year, r.sample_size, r.reason].map(csvCell).join(',') + '\n');
+    }
+    return;
+  }
+  // The median alone would read as one person's age; the middle half sits next to it.
+  const range = (x) => (x ? `${x.low}-${x.high}` : '');
+  const header = ['NAME', 'COUNTRY', 'AGE', 'MIDDLE HALF', 'MIDDLE 80%', 'REASON'];
+  const rows = results.map((r) => [r.name, r.country, r.age ?? '', range(r.age_range), range(r.age_range_80), r.reason ?? '']);
+  if (results.every((r) => !r.reason)) {
+    header.pop();
+    rows.forEach((row) => row.pop());
+  }
+  printTable(header, rows);
+}
+
+async function age(values) {
+  if (values.length === 1) {
+    const result = await client.age(values[0], ageOptions);
+    printAges([result], result);
+    return;
+  }
+
+  const results = [];
+  let last = null;
+  let charged = 0;
+  for (let i = 0; i < values.length; i += CHUNK) {
+    last = await client.ageBulk(values.slice(i, i + CHUNK), ageOptions);
+    charged += last.credits_charged ?? 0;
+    results.push(...last.results);
+  }
+  printAges(results, { ...last, credits_charged: charged, results });
+}
+
 async function salutation(values) {
   if (values.length === 1) {
     const result = await client.salutation(values[0], salutationOptions);
@@ -309,14 +374,14 @@ async function main() {
     return;
   }
 
-  let values = isSalutation || isCheck ? rest : positionals;
+  let values = isSalutation || isCheck || isAge ? rest : positionals;
   if (values.length === 0) {
     if (process.stdin.isTTY) { process.stdout.write(`${HELP}\n`); process.exit(2); }
     values = await readStdin();
     if (values.length === 0) fail('No input.', 2);
   }
 
-  await (isSalutation ? salutation(values) : isCheck ? check(values) : lookup(values));
+  await (isSalutation ? salutation(values) : isCheck ? check(values) : isAge ? age(values) : lookup(values));
 }
 
 main().catch((error) => {

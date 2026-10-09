@@ -32,6 +32,7 @@ cat names.txt | npx namegender --csv > genders.csv
 npx namegender countries Mehmet
 npx namegender salutation "Ahmet Yılmaz" --language tr
 npx namegender check "asdf qwerty" "Jennifer Null"
+npx namegender age Brittany Mildred
 npx namegender account
 ```
 
@@ -56,6 +57,11 @@ as in the client. `--csv` prints `query,salutation,form,reason,gender,language`.
 against each quoted full name (info and positive signals are left out of the
 table). `--country` and `--locale` work as in the client; `--json` prints the
 full response and `--csv` prints `query,assessment,score,signals,name_type`.
+
+`namegender age` prints the median age with the middle half and the middle 80%
+of the living people who have each name. `--country`, `--locale` and
+`--gender male|female` work as in the client; `--csv` prints
+`query,country,age,age_low,age_high,age_80_low,age_80_high,birth_year,sample_size,reason`.
 
 ## Options and response
 
@@ -141,6 +147,34 @@ null). Options are `country`, `locale` and `ip`.
 One credit per name. It never calls a name fake: use it to flag records for a
 look, not to reject people automatically. First names are checked against the
 name data; surnames are judged by their shape only.
+
+## Age from name
+
+How old the living people with a first name are: the median age, the middle
+half (`age_range`) and the middle 80% (`age_range_80`).
+
+```js
+const a = await client.age('Brittany');
+console.log(a.age, a.age_range);   // 36 { low: 32, high: 38 }
+console.log(a.country_source);     // 'default': no hint, so the US series
+
+const b = await client.age('Kevin', { country: 'FR' });
+console.log(b.age);                // 34 (47 in the US)
+
+const leslie = await client.age('Leslie', { gender: 'male' }); // 66; women called Leslie: 50
+
+const list = await client.ageBulk(['Jean', 'Léa'], { country: 'FR' }); // up to 100
+```
+
+Covered: the United States (SSA births 1880–2024), France (INSEE 1900–2025)
+and Norway (SSB 1945–2025). Without a hint the US series is used. Another
+country returns `age: null` with `reason: 'country_not_covered'` and costs no
+credit; otherwise one credit per name, including `'not_found'`. Options are
+`gender`, `country`, `locale` and `ip`.
+
+It describes a group, not a person: for most names the middle half spans 10 to
+25 years. Use it for audience analysis and research, never to decide anything
+about one person.
 
 ## Country distribution
 

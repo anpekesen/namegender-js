@@ -128,6 +128,52 @@ export interface NameCheckBulkResponse extends Envelope {
   /** In input order. */
   results: NameCheckResult[];
 }
+export interface AgeOptions {
+  /** Use only one gender's records. Men called Leslie are far older than women. */
+  gender?: 'male'|'female';
+  /** Country hint, as in `Options`. Covered: US, FR, NO; without a hint the US series is used. */
+  country?: string;
+  locale?: string;
+  ip?: string;
+}
+export interface AgeRange { low: number; high: number }
+/**
+ * How old the living people with a first name are. It describes a group, not
+ * a person: never use it to decide anything about one person.
+ */
+export interface AgeResult {
+  name: string;
+  first_name: string | null;
+  /** The gender filter that was sent, or null for both. */
+  gender: 'male'|'female'|null;
+  /** Median age; null with a `reason`. */
+  age: number | null;
+  /** The middle half (25th to 75th percentile). */
+  age_range: AgeRange | null;
+  /** The middle 80% (10th to 90th percentile). */
+  age_range_80: AgeRange | null;
+  birth_year: number | null;
+  /** Estimated living people with the name in the series. */
+  sample_size: number;
+  /** Registered births with the name over the whole series. */
+  births: number;
+  country: string;
+  /** `default`: no hint was sent and the US series was used. */
+  country_source: 'country'|'locale'|'ip'|'default';
+  source: 'ssa'|'insee'|'ssb'|null;
+  /** Birth years in the series, e.g. "1880-2024". */
+  series: string | null;
+  reference_year: number;
+  /** `country_not_covered` costs no credit. */
+  reason: 'not_found'|'insufficient_data'|'country_not_covered'|null;
+}
+/** The age endpoints carry no `data_version`: their data is not the name-gender snapshot. */
+export interface AgeResponse extends Omit<Envelope, 'data_version'>, AgeResult {}
+export interface AgeBulkResponse extends Omit<Envelope, 'data_version'> {
+  country_source: 'country'|'locale'|'ip'|'default';
+  /** In input order. */
+  results: AgeResult[];
+}
 export interface CountryRegistration { country: string; count: number; share: number; gender: 'male'|'female'|null; probability: number; source: string }
 /**
  * Country distribution of a name. Not a country-of-origin or ethnicity inference:
@@ -269,6 +315,10 @@ export class NameGender {
   nameCheck(options: NameCheckSingleOptions & { name?: string }): Promise<NameCheckResponse>;
   /** 1–100 names, one credit each; the options apply to every name. */
   nameCheckBulk(names: string | Iterable<string>, options?: NameCheckOptions): Promise<NameCheckBulkResponse>;
+  /** One credit; none when the country is not covered. */
+  age(name: string, options?: AgeOptions): Promise<AgeResponse>;
+  /** 1–100 names, one credit each; the options apply to every name. */
+  ageBulk(names: string | Iterable<string>, options?: AgeOptions): Promise<AgeBulkResponse>;
   account(): Promise<AccountResponse>;
   /** File jobs: upload a CSV or XLSX file, get it back with gender columns added. */
   readonly batches: Batches;

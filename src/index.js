@@ -233,6 +233,15 @@ export class NameGender {
     const list = typeof names === 'string' ? [names] : Array.from(names);
     return this.#post('/name-check/bulk', setOnly({ names: list, ...options }));
   }
+  // Age spread of the living people with a first name. Options left
+  // undefined or null are not sent.
+  age(name, options = {}) {
+    return this.#post('/age', setOnly({ name, ...options }));
+  }
+  ageBulk(names, options = {}) {
+    const list = typeof names === 'string' ? [names] : Array.from(names);
+    return this.#post('/age/bulk', setOnly({ names: list, ...options }));
+  }
   account() { return this.#request('/me', { method: 'GET' }); }
 
   async #post(path, body) {
